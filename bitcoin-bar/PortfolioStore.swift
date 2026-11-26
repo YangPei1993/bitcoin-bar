@@ -336,8 +336,11 @@ final class PortfolioStore {
 
     func setFloatingBalanceActive(_ active: Bool) {
         floatingBalanceActive = active
+        // 重建循环以立即切换 5s / 20s 节奏
+        backgroundAlertTask?.cancel()
+        backgroundAlertTask = nil
         syncBackgroundAlertMonitor()
-        if active && enabledAccounts.isEmpty == false && snapshots.isEmpty {
+        if active && enabledAccounts.isEmpty == false {
             Task { await refreshAll() }
         }
     }
@@ -395,16 +398,19 @@ final class PortfolioStore {
         }
     }
 
-    /// 当存在启用中的余额提醒、主动风控规则或悬浮窗展示余额时，后台每 60 秒温和巡检一次
+    /// 悬浮窗展示余额或存在启用中的余额提醒/风控规则时后台巡检：
+    /// 悬浮窗可见时 5 秒高频刷新，仅后台静默风控时 20 秒巡检（远低于 OKX/币安限频）
     private func syncBackgroundAlertMonitor() {
         let shouldRun = (activeBalanceAlertCount > 0 || externalRiskMonitorEnabled || floatingBalanceActive) && enabledAccounts.isEmpty == false
         if shouldRun {
             guard backgroundAlertTask == nil else { return }
             backgroundAlertTask = Task { [weak self] in
                 while Task.isCancelled == false {
-                    try? await Task.sleep(for: .seconds(60))
-                    guard Task.isCancelled == false, let self else { return }
-                    // 前台资产页已在 30s 刷新时不重复触发
+                    guard let self else { return }
+                    let intervalSeconds: Double = self.floatingBalanceActive ? 5 : 20
+                    try? await Task.sleep(for: .seconds(intervalSeconds))
+                    guard Task.isCancelled == false else { return }
+                    // 前台资产页已在 5s 刷新时不重复触发
                     if self.foregroundRefreshTask == nil {
                         await self.refreshAll()
                     }
@@ -513,7 +519,7 @@ final class PortfolioStore {
         foregroundRefreshTask = Task { [weak self] in
             while Task.isCancelled == false {
                 await self?.refreshAll()
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(5))
             }
         }
     }
