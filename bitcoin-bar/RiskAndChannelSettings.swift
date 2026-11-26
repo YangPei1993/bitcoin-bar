@@ -132,6 +132,22 @@ struct RiskRulesSettingsSection: View {
                         }
                     }
                 }
+
+                Divider()
+
+                // 5. 防刷屏重复策略
+                HStack {
+                    Text("持续风险提醒频率")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Picker("", selection: $riskEngine.config.repeatPolicy) {
+                        ForEach(RiskRepeatPolicy.allCases) { policy in
+                            Text(policy.label).tag(policy)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 240)
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -196,7 +212,12 @@ struct NotificationChannelsSettingsView: View {
     // MARK: 1. macOS 本机语音增强提醒
 
     private var localEnhancementSection: some View {
-        sectionCard("macOS 本机增强提醒") {
+        sectionCard("全局勿扰与本机语音提醒") {
+            Toggle("全局静音（暂停所有外部推送与声音提醒）", isOn: $dispatcher.isMuted)
+                .font(.subheadline.weight(.medium))
+
+            Divider()
+
             HStack {
                 Text("中文语音播报")
                 Spacer()

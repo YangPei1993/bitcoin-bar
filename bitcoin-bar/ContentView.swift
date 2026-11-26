@@ -29,6 +29,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
 final class PanelNavigationState {
     var activeSection: PanelSection = .market
     var detailAsset: CryptoAsset?
+    var isPanelVisible = true
     var isPinned = false
     var isFloatingVisible = false
     var searchFocusToken = 0
@@ -105,6 +106,18 @@ struct ContentView: View {
     @State private var quickAlertRepeating = false
 
     var body: some View {
+        Group {
+            if navigation.isPanelVisible {
+                panelRootContent
+            } else {
+                // 面板隐藏时卸载子树，避免后台继续响应行情节流刷新消耗 CPU
+                Color.clear
+            }
+        }
+        .frame(minWidth: 400, idealWidth: 424, maxWidth: .infinity, minHeight: 540, idealHeight: 620, maxHeight: .infinity)
+    }
+
+    private var panelRootContent: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 if let asset = navigation.detailAsset {

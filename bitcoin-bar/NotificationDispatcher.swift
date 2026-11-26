@@ -571,6 +571,7 @@ final class NotificationDispatcher {
     private enum Keys {
         static let channels = "NotificationDispatcher.channels"
         static let voiceMode = "NotificationDispatcher.voiceMode"
+        static let isMuted = "NotificationDispatcher.isMuted"
     }
 
     private(set) var channels: [NotificationChannelConfig] = []
@@ -582,6 +583,13 @@ final class NotificationDispatcher {
         }
     }
 
+    /// 全局勿扰静音开关：开启后暂停本机声音/语音与外部通道推送（仍保留告警记录）
+    var isMuted: Bool {
+        didSet {
+            UserDefaults.standard.set(isMuted, forKey: Keys.isMuted)
+        }
+    }
+
     @ObservationIgnored private let client = ChannelDeliveryClient()
     @ObservationIgnored private let speechSynthesizer = AVSpeechSynthesizer()
     @ObservationIgnored var onDisplayToast: ((AlertPayload) -> Void)?
@@ -589,6 +597,7 @@ final class NotificationDispatcher {
     init() {
         let defaults = UserDefaults.standard
         self.voiceMode = VoiceAlertMode(rawValue: defaults.string(forKey: Keys.voiceMode) ?? "") ?? .criticalOnly
+        self.isMuted = defaults.bool(forKey: Keys.isMuted)
 
         if let data = defaults.data(forKey: Keys.channels),
            let decoded = try? JSONDecoder().decode([NotificationChannelConfig].self, from: data) {
@@ -605,6 +614,21 @@ final class NotificationDispatcher {
     func dispatch(_ payload: AlertPayload) {
         // 1. 面板内 Toast 提示
         onDisplayToast?(payload)
+
+        if isMuted {
+            let mutedRecord = AlertEventRecord(
+                id: payload.id,
+                severity: payload.severity,
+                category: payload.category,
+                title: payload.title,
+                body: payload.body,
+                timestamp: payload.timestamp,
+                deliverySummary: "已静音跳过推送"
+            )
+            recentEvents.insert(mutedRecord, at: 0)
+            if recentEvents.count > 50 { recentEvents.removeLast(recentEvents.count - 50) }
+            return
+        }
 
         // 2. macOS 系统音效（按严重程度区分）
         playLocalSound(for: payload.severity)

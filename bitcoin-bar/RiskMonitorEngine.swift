@@ -1,5 +1,34 @@
 import Foundation
 
+// MARK: - 风控重复提醒策略
+
+nonisolated enum RiskRepeatPolicy: String, CaseIterable, Identifiable, Codable, Sendable {
+    case onceUntilCleared
+    case every30Minutes
+    case every1Hour
+    case every4Hours
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .onceUntilCleared: return "仅首次及显著恶化时提醒（防刷屏）"
+        case .every30Minutes: return "每 30 分钟重复提醒"
+        case .every1Hour: return "每 1 小时重复提醒"
+        case .every4Hours: return "每 4 小时重复提醒"
+        }
+    }
+
+    var repeatIntervalSeconds: TimeInterval? {
+        switch self {
+        case .onceUntilCleared: return nil
+        case .every30Minutes: return 1800
+        case .every1Hour: return 3600
+        case .every4Hours: return 14400
+        }
+    }
+}
+
 // MARK: - 风控规则配置
 
 nonisolated struct RiskAlertConfig: Equatable, Codable, Sendable {
@@ -24,6 +53,9 @@ nonisolated struct RiskAlertConfig: Equatable, Codable, Sendable {
     var volatilityWindowMinutes: Int = 5
     var volatilityThresholdPercent: Double = 3.0
 
+    /// 同类持续风险的重复提醒策略（默认仅首次触发 + 恶化再报，避免刷屏）
+    var repeatPolicy: RiskRepeatPolicy = .onceUntilCleared
+
     var hasPortfolioRiskRuleEnabled: Bool {
         liquidationEnabled || positionLossEnabled || drawdownEnabled
     }
@@ -47,8 +79,11 @@ final class RiskMonitorEngine {
         static let dailyPeakEquity = "RiskMonitorEngine.dailyPeakEquity"
     }
 
-    private static let criticalCooldownSeconds: TimeInterval = 180
-    private static let warningCooldownSeconds: TimeInterval = 600
+    private struct TriggerRecord {
+        let triggeredAt: Date
+        /// 触发时的风险严重度指标（如强平距离越小越严峻，浮亏 ROE 越负越严峻）
+        let metricValue: Double
+    }
 
     var config: RiskAlertConfig {
         didSet {
@@ -69,8 +104,8 @@ final class RiskMonitorEngine {
     @ObservationIgnored private let portfolio: PortfolioStore
     @ObservationIgnored private let dispatcher: NotificationDispatcher
 
-    /// 冷却记录表：key -> 上次触发时间
-    @ObservationIgnored private var cooldowns: [String: Date] = [:]
+    /// 触发记录表：key -> 上次触发时间与触发时指标
+    @ObservationIgnored private var records: [String: TriggerRecord] = [:]
     /// 短时异动价格采样窗口：assetID -> [(时间, 价格)]
     @ObservationIgnored private var priceSamples: [String: [(Date, Double)]] = [:]
     @ObservationIgnored var onConfigChanged: ((RiskAlertConfig) -> Void)?
@@ -106,7 +141,7 @@ final class RiskMonitorEngine {
         syncVolatilityDemand()
     }
 
-    /// 当开启短时异动监控时，持续向行情中枢注册自选与持仓币种，确保收起面板后仍能实时监测插针
+    /// 当开启短时异动监控时，持续向行情中枢注册自选与持仓币种
     func syncVolatilityDemand() {
         guard config.volatilityEnabled else {
             hub.setDemand([], for: "volatility")
@@ -149,6 +184,8 @@ final class RiskMonitorEngine {
                     warnings.append(ActiveRiskWarning(id: key, severity: .critical, title: title, detail: detail))
                     fireIfAllowed(
                         key: key,
+                        metricValue: -distance,
+                        worsenDelta: 1.5, // 距强平再缩近 1.5% 视为显著恶化
                         severity: .critical,
                         category: "强平极危预警",
                         title: title,
@@ -164,6 +201,8 @@ final class RiskMonitorEngine {
                     warnings.append(ActiveRiskWarning(id: key, severity: .warning, title: title, detail: detail))
                     fireIfAllowed(
                         key: key,
+                        metricValue: -distance,
+                        worsenDelta: 2.0,
                         severity: .warning,
                         category: "强平距离预警",
                         title: title,
@@ -186,6 +225,8 @@ final class RiskMonitorEngine {
                     warnings.append(ActiveRiskWarning(id: key, severity: .warning, title: title, detail: detail))
                     fireIfAllowed(
                         key: key,
+                        metricValue: abs(position.roePercent),
+                        worsenDelta: 25.0, // 浮亏 ROE 再恶化 25% 才再次提醒
                         severity: .warning,
                         category: "单仓浮亏预警",
                         title: title,
@@ -214,6 +255,8 @@ final class RiskMonitorEngine {
                     warnings.append(ActiveRiskWarning(id: key, severity: .critical, title: title, detail: detail))
                     fireIfAllowed(
                         key: key,
+                        metricValue: drawdownPct,
+                        worsenDelta: 5.0, // 回撤再扩大 5% 才再次提醒
                         severity: .critical,
                         category: "净值回撤预警",
                         title: title,
@@ -225,10 +268,12 @@ final class RiskMonitorEngine {
             }
         }
 
-        // 风险已解除的仓位清除冷却，确保下次真实触发可立即告警
-        for existingKey in cooldowns.keys where existingKey.hasPrefix("vol-") == false {
-            if activeKeys.contains(existingKey) == false {
-                cooldowns.removeValue(forKey: existingKey)
+        // 仅当全部已启用账户均正常同步无报错时，才解除已恢复仓位的静默记录，防止网络抖动导致误重推
+        if portfolio.accountErrors.isEmpty {
+            for existingKey in records.keys where existingKey.hasPrefix("vol-") == false {
+                if activeKeys.contains(existingKey) == false {
+                    records.removeValue(forKey: existingKey)
+                }
             }
         }
 
@@ -240,7 +285,7 @@ final class RiskMonitorEngine {
         dailyPeakEquityUSD = current
         UserDefaults.standard.set(Self.dayStamp(Date()), forKey: Keys.dailyPeakDate)
         UserDefaults.standard.set(current, forKey: Keys.dailyPeakEquity)
-        cooldowns.removeValue(forKey: "drawdown-daily")
+        records.removeValue(forKey: "drawdown-daily")
         evaluatePortfolioRisks()
     }
 
@@ -249,7 +294,6 @@ final class RiskMonitorEngine {
     private func handleLivePriceForVolatility(assetID: String, quote: CryptoQuote) {
         guard config.volatilityEnabled, quote.price > 0 else { return }
 
-        // 只监控用户自选或当前持仓关联的品种，避免无关榜单噪音
         let watchedIDs = Set(watchlist.favoriteAssets.map(\.id))
             .union(portfolio.positions().map(\.marketAsset.id))
         guard watchedIDs.contains(assetID) else { return }
@@ -258,14 +302,12 @@ final class RiskMonitorEngine {
         let windowSeconds = TimeInterval(max(config.volatilityWindowMinutes, 1) * 60)
         var history = priceSamples[assetID] ?? []
 
-        // 至少间隔 5 秒采样一次，保持内存极低占用
         if let last = history.last, now.timeIntervalSince(last.0) < 5 {
-            // 仍检查是否相对窗口最早采样已突破异动阈值
+            // 降频采样，保持极低内存占用
         } else {
             history.append((now, quote.price))
         }
 
-        // 裁剪超过滑动窗口的旧采样
         let cutoff = now.addingTimeInterval(-windowSeconds)
         history.removeAll { $0.0 < cutoff }
         priceSamples[assetID] = history
@@ -277,24 +319,31 @@ final class RiskMonitorEngine {
         let changePct = (quote.price - oldest.1) / oldest.1 * 100
         guard abs(changePct) >= config.volatilityThresholdPercent else { return }
 
+        let key = "vol-\(assetID)"
+        // 异动提醒固定至少冷却 15 分钟，避免剧烈波动期连续刷屏
+        if let prev = records[key], now.timeIntervalSince(prev.triggeredAt) < 900 {
+            return
+        }
+
         let directionWord = changePct > 0 ? "急速拉升" : "快速下挫"
         let symbol = assetID.split(separator: "-").first.map(String.init) ?? assetID
-        let key = "vol-\(assetID)"
         let title = "\(symbol) \(config.volatilityWindowMinutes)分钟\(directionWord) \(MarketFormatter.changePercent(changePct))"
         let body = "\(assetID) 现价 \(MarketFormatter.price(quote.price))（\(config.volatilityWindowMinutes) 分钟前 \(MarketFormatter.price(oldest.1))）"
 
-        fireIfAllowed(
-            key: key,
-            severity: .warning,
-            category: "短时异动提醒",
-            title: title,
-            body: body,
-            assetID: assetID,
-            openPortfolio: false
+        records[key] = TriggerRecord(triggeredAt: now, metricValue: abs(changePct))
+        dispatcher.dispatch(
+            AlertPayload(
+                severity: .warning,
+                category: "短时异动提醒",
+                title: title,
+                body: body,
+                assetID: assetID,
+                openPortfolio: false
+            )
         )
     }
 
-    // MARK: 辅助逻辑
+    // MARK: 防刷屏判定逻辑
 
     private func updateDailyPeakIfNeeded(currentEquity: Double) {
         let today = Self.dayStamp(Date())
@@ -311,6 +360,8 @@ final class RiskMonitorEngine {
 
     private func fireIfAllowed(
         key: String,
+        metricValue: Double,
+        worsenDelta: Double,
         severity: AlertSeverity,
         category: String,
         title: String,
@@ -319,12 +370,26 @@ final class RiskMonitorEngine {
         openPortfolio: Bool
     ) {
         let now = Date()
-        let cooldown = severity == .critical ? Self.criticalCooldownSeconds : Self.warningCooldownSeconds
-        if let last = cooldowns[key], now.timeIntervalSince(last) < cooldown {
-            return
-        }
-        cooldowns[key] = now
 
+        if let prev = records[key] {
+            let elapsed = now.timeIntervalSince(prev.triggeredAt)
+            // 任何同类风险至少间隔 5 分钟，杜绝抖动连发
+            guard elapsed >= 300 else { return }
+
+            let significantlyWorsened = (metricValue - prev.metricValue) >= worsenDelta
+            let repeatIntervalReached: Bool
+            if let repeatSeconds = config.repeatPolicy.repeatIntervalSeconds {
+                repeatIntervalReached = elapsed >= repeatSeconds
+            } else {
+                repeatIntervalReached = false
+            }
+
+            guard significantlyWorsened || repeatIntervalReached else {
+                return
+            }
+        }
+
+        records[key] = TriggerRecord(triggeredAt: now, metricValue: metricValue)
         dispatcher.dispatch(
             AlertPayload(
                 severity: severity,

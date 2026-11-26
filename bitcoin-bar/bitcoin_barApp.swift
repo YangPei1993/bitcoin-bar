@@ -55,6 +55,7 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
             hub: hub,
             settings: settings,
             watchlist: watchlist,
+            dispatcher: dispatcher,
             isPanelVisible: { [weak self] in self?.marketPanelController.isVisible ?? false },
             isFloatingVisible: { [weak self] in self?.floatingWindowController.isVisible ?? false },
             onTogglePanel: { [weak self] anchorRect in
@@ -116,6 +117,16 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
 
         floatingWindowController.onVisibilityChanged = { [weak self] visible in
             self?.navigation.isFloatingVisible = visible
+        }
+
+        marketPanelController.onVisibilityChanged = { [weak self] visible in
+            guard let self else { return }
+            self.navigation.isPanelVisible = visible
+            if visible == false {
+                self.hub.setDemand([], for: "panel")
+                self.tickerStore.deactivateDetail()
+                self.portfolioStore.stopAutoRefresh()
+            }
         }
 
         watchlist.onFavoritesChanged = { [weak self] _ in
@@ -334,6 +345,7 @@ final class MarketPanelController: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var hostingController: NSHostingController<ContentView>?
     private var lastAutoHideTime: Date?
+    var onVisibilityChanged: ((Bool) -> Void)?
 
     var isPinned = false
 
@@ -358,6 +370,7 @@ final class MarketPanelController: NSObject, NSWindowDelegate {
             }
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            onVisibilityChanged?(true)
             return
         }
 
@@ -392,10 +405,12 @@ final class MarketPanelController: NSObject, NSWindowDelegate {
         position(panel, relativeTo: anchorRect)
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        onVisibilityChanged?(true)
     }
 
     func hide() {
         panel?.orderOut(nil)
+        onVisibilityChanged?(false)
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -404,6 +419,7 @@ final class MarketPanelController: NSObject, NSWindowDelegate {
               panel.attachedSheet == nil else { return }
         lastAutoHideTime = Date()
         panel.orderOut(nil)
+        onVisibilityChanged?(false)
     }
 
     private func position(_ panel: NSPanel, relativeTo anchorRect: NSRect?) {
@@ -464,6 +480,7 @@ final class StatusBarController: NSObject {
     private let hub: MarketQuoteHub
     private let settings: AppSettings
     private let watchlist: WatchlistStore
+    private let dispatcher: NotificationDispatcher
     private let isPanelVisible: () -> Bool
     private let isFloatingVisible: () -> Bool
     private let onTogglePanel: (NSRect?) -> Void
@@ -478,6 +495,7 @@ final class StatusBarController: NSObject {
         hub: MarketQuoteHub,
         settings: AppSettings,
         watchlist: WatchlistStore,
+        dispatcher: NotificationDispatcher,
         isPanelVisible: @escaping () -> Bool,
         isFloatingVisible: @escaping () -> Bool,
         onTogglePanel: @escaping (NSRect?) -> Void,
@@ -488,6 +506,7 @@ final class StatusBarController: NSObject {
         self.hub = hub
         self.settings = settings
         self.watchlist = watchlist
+        self.dispatcher = dispatcher
         self.isPanelVisible = isPanelVisible
         self.isFloatingVisible = isFloatingVisible
         self.onTogglePanel = onTogglePanel
@@ -633,6 +652,15 @@ final class StatusBarController: NSObject {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
+        let muteItem = NSMenuItem(
+            title: dispatcher.isMuted ? "恢复推送提醒（当前已静音）" : "静音所有推送提醒",
+            action: #selector(menuToggleMute),
+            keyEquivalent: ""
+        )
+        muteItem.target = self
+        muteItem.state = dispatcher.isMuted ? .on : .off
+        menu.addItem(muteItem)
+
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: "设置...", action: #selector(menuOpenSettings), keyEquivalent: ",")
@@ -666,6 +694,10 @@ final class StatusBarController: NSObject {
 
     @objc private func menuRefreshNow() {
         hub.reconnectNow()
+    }
+
+    @objc private func menuToggleMute() {
+        dispatcher.isMuted.toggle()
     }
 
     @objc private func menuOpenSettings() {
