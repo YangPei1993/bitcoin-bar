@@ -155,6 +155,7 @@ final class PortfolioStore {
     @ObservationIgnored private var foregroundRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var backgroundAlertTask: Task<Void, Never>?
     @ObservationIgnored private var externalRiskMonitorEnabled = false
+    @ObservationIgnored private var floatingBalanceActive = false
     @ObservationIgnored var onBalanceAlertTriggered: ((BalanceAlert, Double) -> Void)?
     @ObservationIgnored var onSnapshotsUpdated: (() -> Void)?
 
@@ -333,6 +334,14 @@ final class PortfolioStore {
         syncBackgroundAlertMonitor()
     }
 
+    func setFloatingBalanceActive(_ active: Bool) {
+        floatingBalanceActive = active
+        syncBackgroundAlertMonitor()
+        if active && enabledAccounts.isEmpty == false && snapshots.isEmpty {
+            Task { await refreshAll() }
+        }
+    }
+
     private func notifyBalanceAlert(_ alert: BalanceAlert, currentValue: Double) {
         let formattedNow = alert.scope.isUSD
             ? MarketFormatter.price(currentValue)
@@ -386,9 +395,9 @@ final class PortfolioStore {
         }
     }
 
-    /// 当存在启用中的余额提醒或主动风控规则且已绑定账户时，后台每 60 秒温和巡检一次
+    /// 当存在启用中的余额提醒、主动风控规则或悬浮窗展示余额时，后台每 60 秒温和巡检一次
     private func syncBackgroundAlertMonitor() {
-        let shouldRun = (activeBalanceAlertCount > 0 || externalRiskMonitorEnabled) && enabledAccounts.isEmpty == false
+        let shouldRun = (activeBalanceAlertCount > 0 || externalRiskMonitorEnabled || floatingBalanceActive) && enabledAccounts.isEmpty == false
         if shouldRun {
             guard backgroundAlertTask == nil else { return }
             backgroundAlertTask = Task { [weak self] in

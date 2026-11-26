@@ -133,6 +133,7 @@ final class AppSettings {
         static let menuBarColoredChange = "AppSettings.menuBarColoredChange"
         static let floatingWindowOpacity = "AppSettings.floatingWindowOpacity.v2"
         static let floatingShowsChange = "AppSettings.floatingShowsChange"
+        static let floatingShowsBalance = "AppSettings.floatingShowsBalance"
         static let floatingClickThrough = "AppSettings.floatingClickThrough"
         static let floatingVisibleOnLaunch = "AppSettings.floatingVisibleOnLaunch"
         static let floatingFrame = "AppSettings.floatingFrame"
@@ -212,6 +213,13 @@ final class AppSettings {
         }
     }
 
+    var floatingShowsBalance: Bool {
+        didSet {
+            UserDefaults.standard.set(floatingShowsBalance, forKey: Keys.floatingShowsBalance)
+            onFloatingShowsBalanceChanged?(floatingShowsBalance)
+        }
+    }
+
     var floatingClickThrough: Bool {
         didSet {
             UserDefaults.standard.set(floatingClickThrough, forKey: Keys.floatingClickThrough)
@@ -239,6 +247,7 @@ final class AppSettings {
     @ObservationIgnored var onMenuBarAssetChanged: ((CryptoAsset) -> Void)?
     @ObservationIgnored var onMenuBarStyleChanged: (() -> Void)?
     @ObservationIgnored var onFloatingClickThroughChanged: ((Bool) -> Void)?
+    @ObservationIgnored var onFloatingShowsBalanceChanged: ((Bool) -> Void)?
 
     init() {
         let defaults = UserDefaults.standard
@@ -265,6 +274,7 @@ final class AppSettings {
         }
 
         self.floatingShowsChange = defaults.object(forKey: Keys.floatingShowsChange) as? Bool ?? true
+        self.floatingShowsBalance = defaults.object(forKey: Keys.floatingShowsBalance) as? Bool ?? true
         self.floatingClickThrough = false
         self.floatingVisibleOnLaunch = defaults.object(forKey: Keys.floatingVisibleOnLaunch) as? Bool ?? false
 

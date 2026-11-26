@@ -115,6 +115,10 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
             self?.floatingWindowController.updateClickThrough(enabled)
         }
 
+        settings.onFloatingShowsBalanceChanged = { [weak self] _ in
+            self?.floatingWindowController.syncBalancePreference()
+        }
+
         floatingWindowController.onVisibilityChanged = { [weak self] visible in
             self?.navigation.isFloatingVisible = visible
         }
@@ -305,20 +309,36 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
         floatingWindowController.open(
             hub: hub,
             watchlist: watchlist,
-            settings: settings
-        ) { [weak self] asset in
-            self?.openMarketPanel(detailAsset: asset, from: self?.statusBarController?.buttonScreenFrame)
-        }
+            portfolio: portfolioStore,
+            settings: settings,
+            openAssetDetail: { [weak self] asset in
+                self?.openMarketPanel(detailAsset: asset, from: self?.statusBarController?.buttonScreenFrame)
+            },
+            openPortfolio: { [weak self] in
+                guard let self else { return }
+                self.navigation.detailAsset = nil
+                self.navigation.activeSection = .portfolio
+                self.openMarketPanel(detailAsset: nil, from: self.statusBarController?.buttonScreenFrame)
+            }
+        )
     }
 
     private func toggleFloatingWindow() {
         floatingWindowController.toggle(
             hub: hub,
             watchlist: watchlist,
-            settings: settings
-        ) { [weak self] asset in
-            self?.openMarketPanel(detailAsset: asset, from: self?.statusBarController?.buttonScreenFrame)
-        }
+            portfolio: portfolioStore,
+            settings: settings,
+            openAssetDetail: { [weak self] asset in
+                self?.openMarketPanel(detailAsset: asset, from: self?.statusBarController?.buttonScreenFrame)
+            },
+            openPortfolio: { [weak self] in
+                guard let self else { return }
+                self.navigation.detailAsset = nil
+                self.navigation.activeSection = .portfolio
+                self.openMarketPanel(detailAsset: nil, from: self.statusBarController?.buttonScreenFrame)
+            }
+        )
     }
 
     private func openSettings(tab: SettingsTab) {

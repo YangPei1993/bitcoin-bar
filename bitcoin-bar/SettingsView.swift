@@ -284,6 +284,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                Toggle("在顶部栏显示账户总余额", isOn: $settings.floatingShowsBalance)
+
+                Divider()
+
                 Toggle("鼠标穿透模式（点击穿透到下方窗口）", isOn: $settings.floatingClickThrough)
                 Text("开启后悬浮窗不拦截鼠标事件，适合边工作边看盘；可在菜单栏右键菜单中随时关闭穿透。")
                     .font(.caption)

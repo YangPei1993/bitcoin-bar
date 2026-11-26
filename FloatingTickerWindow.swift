@@ -10,7 +10,9 @@ final class FloatingTickerWindowController: NSObject, NSWindowDelegate {
     private var settings: AppSettings?
     private var hub: MarketQuoteHub?
     private var watchlist: WatchlistStore?
+    private var portfolio: PortfolioStore?
     private var openAssetDetail: ((CryptoAsset?) -> Void)?
+    private var openPortfolio: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
 
     var isVisible: Bool {
@@ -20,28 +22,42 @@ final class FloatingTickerWindowController: NSObject, NSWindowDelegate {
     func toggle(
         hub: MarketQuoteHub,
         watchlist: WatchlistStore,
+        portfolio: PortfolioStore,
         settings: AppSettings,
-        openAssetDetail: @escaping (CryptoAsset?) -> Void
+        openAssetDetail: @escaping (CryptoAsset?) -> Void,
+        openPortfolio: @escaping () -> Void
     ) {
         if let panel, panel.isVisible {
             close()
         } else {
-            open(hub: hub, watchlist: watchlist, settings: settings, openAssetDetail: openAssetDetail)
+            open(
+                hub: hub,
+                watchlist: watchlist,
+                portfolio: portfolio,
+                settings: settings,
+                openAssetDetail: openAssetDetail,
+                openPortfolio: openPortfolio
+            )
         }
     }
 
     func open(
         hub: MarketQuoteHub,
         watchlist: WatchlistStore,
+        portfolio: PortfolioStore,
         settings: AppSettings,
-        openAssetDetail: @escaping (CryptoAsset?) -> Void
+        openAssetDetail: @escaping (CryptoAsset?) -> Void,
+        openPortfolio: @escaping () -> Void
     ) {
         self.hub = hub
         self.watchlist = watchlist
+        self.portfolio = portfolio
         self.settings = settings
         self.openAssetDetail = openAssetDetail
+        self.openPortfolio = openPortfolio
 
         hub.setDemand(watchlist.floatingAssets, for: "floating")
+        portfolio.setFloatingBalanceActive(settings.floatingShowsBalance)
 
         if let panel {
             panel.ignoresMouseEvents = settings.floatingClickThrough
@@ -53,9 +69,11 @@ final class FloatingTickerWindowController: NSObject, NSWindowDelegate {
         let rootView = FloatingTickerView(
             hub: hub,
             watchlist: watchlist,
+            portfolio: portfolio,
             settings: settings,
             onSelectAsset: { asset in openAssetDetail(asset) },
             onOpenMainPanel: { openAssetDetail(nil) },
+            onOpenPortfolio: openPortfolio,
             onClose: { [weak self] in self?.close() }
         )
 
@@ -101,11 +119,17 @@ final class FloatingTickerWindowController: NSObject, NSWindowDelegate {
         }
         panel?.orderOut(nil)
         hub?.setDemand([], for: "floating")
+        portfolio?.setFloatingBalanceActive(false)
         onVisibilityChanged?(false)
     }
 
     func updateClickThrough(_ enabled: Bool) {
         panel?.ignoresMouseEvents = enabled
+    }
+
+    func syncBalancePreference() {
+        guard isVisible, let settings else { return }
+        portfolio?.setFloatingBalanceActive(settings.floatingShowsBalance)
     }
 
     func syncWatchlistDemand() {
@@ -142,6 +166,11 @@ final class FloatingTickerWindowController: NSObject, NSWindowDelegate {
         changeItem.target = self
         changeItem.state = (settings?.floatingShowsChange ?? true) ? .on : .off
         menu.addItem(changeItem)
+
+        let balanceItem = NSMenuItem(title: "顶部栏显示账户余额", action: #selector(handleToggleBalance), keyEquivalent: "")
+        balanceItem.target = self
+        balanceItem.state = (settings?.floatingShowsBalance ?? true) ? .on : .off
+        menu.addItem(balanceItem)
 
         let opacityMenu = NSMenu()
         let presets: [(String, Double)] = [
@@ -182,6 +211,10 @@ final class FloatingTickerWindowController: NSObject, NSWindowDelegate {
 
     @objc private func handleToggleChange() {
         settings?.floatingShowsChange.toggle()
+    }
+
+    @objc private func handleToggleBalance() {
+        settings?.floatingShowsBalance.toggle()
     }
 
     @objc private func handleOpacityPreset(_ sender: NSMenuItem) {
@@ -276,13 +309,7 @@ final class FloatingTickerPanel: NSPanel {
             return false
         }
 
-        // 点击顶部标题栏区域，立即开始拖动窗口
-        if inHeaderZone {
-            performDrag(with: downEvent)
-            return true
-        }
-
-        // 点击列表区域：区分“拖动窗口（移动 >= 4pt）”与“单击币种打开详情”
+        // 顶部栏及主体区域统一采用“拖动 ≥ 4pt 移动窗口，轻点则正常响应按钮（如点击余额跳资产页 / 点击币种跳详情）”
         let startLocation = point
         let dragThreshold: CGFloat = 4
 
@@ -346,9 +373,11 @@ private struct VisualEffectBlur: NSViewRepresentable {
 struct FloatingTickerView: View {
     let hub: MarketQuoteHub
     let watchlist: WatchlistStore
+    let portfolio: PortfolioStore
     @Bindable var settings: AppSettings
     let onSelectAsset: (CryptoAsset) -> Void
     let onOpenMainPanel: () -> Void
+    let onOpenPortfolio: () -> Void
     let onClose: () -> Void
 
     @State private var isHoveringWindow = false
@@ -392,6 +421,11 @@ struct FloatingTickerView: View {
             Text("自选行情")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.86))
+                .layoutPriority(1)
+
+            if settings.floatingShowsBalance && portfolio.enabledAccounts.isEmpty == false {
+                balanceBadge
+            }
 
             Spacer(minLength: 4)
 
@@ -456,8 +490,43 @@ struct FloatingTickerView: View {
 
             Toggle("显示 24h 涨跌幅", isOn: $settings.floatingShowsChange)
                 .font(.caption)
+
+            Toggle("顶部栏显示账户余额", isOn: $settings.floatingShowsBalance)
+                .font(.caption)
         }
         .padding(12)
+    }
+
+    private var balanceBadge: some View {
+        let hasSnapshot = portfolio.enabledAccounts.contains { portfolio.snapshots[$0.id] != nil }
+        let equity = portfolio.totalEquityUSD()
+        let text: String = {
+            if portfolio.hideAmounts { return "****" }
+            guard hasSnapshot else { return "--" }
+            return MarketFormatter.price(equity)
+        }()
+
+        return Button(action: onOpenPortfolio) {
+            HStack(spacing: 3) {
+                Image(systemName: "wallet.bifold.fill")
+                    .font(.system(size: 8.5))
+                    .foregroundStyle(.white.opacity(0.62))
+                Text(text)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.white.opacity(0.11), in: Capsule())
+            .overlay(
+                Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("已绑定账户总余额（点击查看资产与仓位）")
     }
 
     private var rowsList: some View {
