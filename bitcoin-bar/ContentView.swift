@@ -76,6 +76,7 @@ struct ContentView: View {
     let watchlist: WatchlistStore
     let alertStore: PriceAlertStore
     let portfolioStore: PortfolioStore
+    let tradingStore: OKXTradingStore
     let riskEngine: RiskMonitorEngine
     @Bindable var settings: AppSettings
     let aiCache: AIAnalysisCache
@@ -127,6 +128,7 @@ struct ContentView: View {
                         tickerStore: tickerStore,
                         watchlist: watchlist,
                         alertStore: alertStore,
+                        tradingStore: tradingStore,
                         settings: settings,
                         aiCache: aiCache,
                         onBack: {
@@ -135,6 +137,7 @@ struct ContentView: View {
                             }
                         },
                         onOpenAISettings: { openSettings(.ai) },
+                        onOpenTradingSettings: { openSettings(.accounts) },
                         onShowToast: { navigation.showToast($0) }
                     )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -147,6 +150,7 @@ struct ContentView: View {
                         Divider()
                         PortfolioView(
                             portfolio: portfolioStore,
+                            tradingStore: tradingStore,
                             riskEngine: riskEngine,
                             settings: settings,
                             onOpenAccountSettings: { openSettings(.accounts) },

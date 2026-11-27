@@ -9,12 +9,15 @@ struct AssetDetailView: View {
     let tickerStore: CryptoTickerStore
     let watchlist: WatchlistStore
     let alertStore: PriceAlertStore
+    @Bindable var tradingStore: OKXTradingStore
     let settings: AppSettings
     let aiCache: AIAnalysisCache
     let onBack: () -> Void
     let onOpenAISettings: () -> Void
+    let onOpenTradingSettings: () -> Void
     let onShowToast: (String) -> Void
 
+    @State private var quickOrderSide: TradeOrderSide?
     @State private var isShowingAddAlert = false
     @State private var alertDirection: PriceAlertDirection = .above
     @State private var alertPriceInput = ""
@@ -52,6 +55,7 @@ struct AssetDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     priceOverviewCard
+                    quickTradeBar
                     chartCard
                     quickAlertCard
                     aiAnalysisCard
@@ -59,6 +63,17 @@ struct AssetDetailView: View {
                 .padding(14)
             }
             .scrollIndicators(.hidden)
+        }
+        .sheet(item: $quickOrderSide) { side in
+            QuickOrderSheet(
+                asset: asset,
+                referencePrice: quote?.price ?? 0,
+                settings: settings,
+                tradingStore: tradingStore,
+                initialSide: side,
+                onOpenTradingSettings: onOpenTradingSettings,
+                onOrderSucceeded: { msg in onShowToast(msg) }
+            )
         }
         .onAppear {
             tickerStore.activateDetail(for: asset)
@@ -70,6 +85,50 @@ struct AssetDetailView: View {
         }
         .onDisappear {
             tickerStore.deactivateDetail()
+        }
+    }
+
+    // MARK: 快捷交易操作条
+
+    private var quickTradeBar: some View {
+        HStack(spacing: 8) {
+            if tradingStore.config.tradingEnabled {
+                Button {
+                    quickOrderSide = .buy
+                } label: {
+                    Label(TradeOrderSide.buy.label(for: asset.instrumentKind), systemImage: "arrow.up.right.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(settings.upColor)
+
+                Button {
+                    quickOrderSide = .sell
+                } label: {
+                    Label(TradeOrderSide.sell.label(for: asset.instrumentKind), systemImage: "arrow.down.right.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(settings.downColor)
+            } else {
+                Button {
+                    quickOrderSide = .buy
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.shield")
+                        Text("OKX 快捷下单（前往设置开启交易模式）")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+            }
         }
     }
 

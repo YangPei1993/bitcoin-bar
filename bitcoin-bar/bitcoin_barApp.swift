@@ -16,6 +16,7 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
     private lazy var tickerStore = CryptoTickerStore(hub: hub)
     private lazy var alertStore = PriceAlertStore(hub: hub, dispatcher: dispatcher)
     private lazy var portfolioStore = PortfolioStore(dispatcher: dispatcher)
+    private lazy var tradingStore = OKXTradingStore(portfolio: portfolioStore)
     private lazy var riskEngine = RiskMonitorEngine(
         hub: hub,
         watchlist: watchlist,
@@ -292,6 +293,7 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
             watchlist: watchlist,
             alertStore: alertStore,
             portfolioStore: portfolioStore,
+            tradingStore: tradingStore,
             riskEngine: riskEngine,
             settings: settings,
             aiCache: aiCache,
@@ -348,6 +350,7 @@ final class bitcoin_barApp: NSObject, NSApplicationDelegate, UNUserNotificationC
             watchlist: watchlist,
             alertStore: alertStore,
             portfolioStore: portfolioStore,
+            tradingStore: tradingStore,
             riskEngine: riskEngine,
             dispatcher: dispatcher,
             tickerStore: tickerStore,

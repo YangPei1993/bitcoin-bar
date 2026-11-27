@@ -47,6 +47,7 @@ struct SettingsView: View {
     let watchlist: WatchlistStore
     let alertStore: PriceAlertStore
     let portfolioStore: PortfolioStore
+    let tradingStore: OKXTradingStore
     let riskEngine: RiskMonitorEngine
     let dispatcher: NotificationDispatcher
     let tickerStore: CryptoTickerStore
@@ -80,6 +81,7 @@ struct SettingsView: View {
         watchlist: WatchlistStore,
         alertStore: PriceAlertStore,
         portfolioStore: PortfolioStore,
+        tradingStore: OKXTradingStore,
         riskEngine: RiskMonitorEngine,
         dispatcher: NotificationDispatcher,
         tickerStore: CryptoTickerStore,
@@ -91,6 +93,7 @@ struct SettingsView: View {
         self.watchlist = watchlist
         self.alertStore = alertStore
         self.portfolioStore = portfolioStore
+        self.tradingStore = tradingStore
         self.riskEngine = riskEngine
         self.dispatcher = dispatcher
         self.tickerStore = tickerStore
@@ -308,13 +311,17 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 Image(systemName: "lock.shield.fill")
                     .foregroundStyle(MarketColors.green)
-                Text("安全提示：请在交易所仅创建“只读（Read-Only）”权限的 API Key，切勿勾选交易或提币权限。所有密钥均加密保存在本机 macOS 钥匙串中。")
+                Text("安全提示：仅看资产请创建「只读」API Key；如需启用 OKX 交易请仅勾选「读取 + 交易」，严禁勾选提币权限，强烈建议绑定 IP 白名单。密钥仅加密存于本机 macOS 钥匙串。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(MarketColors.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+
+            settingsSection("OKX 交易与安全护栏") {
+                TradingSecuritySettingsContent(tradingStore: tradingStore)
+            }
 
             settingsSection("已绑定账户（\(portfolioStore.accounts.count)）") {
                 if portfolioStore.accounts.isEmpty {
