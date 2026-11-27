@@ -496,7 +496,7 @@ struct ContentView: View {
             sortHeaderButton(title: "最新价", field: .price)
                 .frame(width: 96, alignment: .trailing)
 
-            sortHeaderButton(title: "24h 涨跌", field: .change24h)
+            sortHeaderButton(title: "UTC+0 涨跌", field: .change24h)
                 .frame(width: 74, alignment: .trailing)
         }
         .padding(.horizontal, 14)

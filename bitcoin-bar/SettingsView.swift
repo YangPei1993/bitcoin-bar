@@ -280,7 +280,7 @@ struct SettingsView: View {
 
                 Divider()
 
-                Toggle("显示 24h 涨跌幅徽章", isOn: $settings.floatingShowsChange)
+                Toggle("显示涨跌幅徽章 (UTC+0)", isOn: $settings.floatingShowsChange)
 
                 Divider()
 

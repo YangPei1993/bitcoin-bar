@@ -231,7 +231,7 @@ struct AssetDetailView: View {
                                 .monospacedDigit()
                                 .foregroundStyle(color.opacity(0.9))
 
-                            Text("24h")
+                            Text("UTC+0")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                         }
